@@ -19,6 +19,21 @@ and performing data preprocessing for further analysis.
 - Add docstrings to each function 
 - Add additional arguments for each argument
 
+### Short write up
+
+ Write out an example.ipynb illustrating how the code in this repository runs. Include answers the following questions in the notebook. 
+
+1. What are functional traits? 
+
+2. What differentiates Functional Diversity and Species Diversity
+
+3. What is the importance of converting an R package to a python package? 
+
+### Bonus 
+
+Have a look at [FDiv](https://search.r-project.org/CRAN/refmans/fundiversity/html/fd_fdiv.html). Can you compare the two? 
+
+
 ## Table of Contents
 - [Installation](#installation)
 - [Usage](#usage)
@@ -59,6 +74,7 @@ FEve = functional_evenness(traits, abundances)
 print("FRic:", FRic)
 print("FEve:", FEve)
 ```
+
 
 ## Examples
 

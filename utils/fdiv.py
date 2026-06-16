@@ -60,7 +60,6 @@ def Functional_Richness(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame
             Frich.append(np.nan)
             pID.append(pid)
             
-            continue
             continue  # will automatically go to the next iteration
         # Scale traits
         traits_scaled = StandardScaler().fit_transform(traits_sub)

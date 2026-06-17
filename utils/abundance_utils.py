@@ -1,23 +1,22 @@
-
 import numpy as np
 import pandas as pd
 
 
-def Relative_Abundance(df: pd.DataFrame, abundances_col: str) -> pd.DataFrame:
+def calculate_relative_abundance(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute relative abundances (%) for a given abundance column.
 
     Args:
         df: pandas DataFrame with species abundances
-        abundances_col: column name for absolute abundances
+            each contains the absolute abundances
 
     Returns:
-        df: DataFrame with new column "Relative_Abundances"
+        df: new dataframe containing relative abundances
     """
-    total = df[abundances_col].sum()
-    df["Relative_Abundances"] = df[abundances_col] / total * 100
-    
-    return df
+    row_sum = df.sum(axis = 1)
+    df_relative_frequency = df.div(row_sum, axis = 0)
+
+    return df_relative_frequency
 
 def normalise_abundance(abundances: list) -> np.ndarray:
     """

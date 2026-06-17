@@ -7,7 +7,7 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.preprocessing import StandardScaler
 
 import networkx as nx
-# from utils.abundance_utils import Relative_Abundance, normalise_abundance
+from utils.abundance_utils import calculate_relative_abundance
 
 
 from scipy.spatial import Delaunay
@@ -29,55 +29,65 @@ Functional dispersion (FDis)
 Rao's Quadratic Entropy (RaoQ)
 
 """
-def Functional_Richness(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame:
+def functional_richness(sp_loc: pd.DataFrame, traits: pd.DataFrame, relative_abundance: bool = False, standardise_traits = True) -> pd.DataFrame:
     """
     Compute Functional Richness (FRic) as the volume of the convex hull
-    in standardized trait space.
+    in standardised trait space.
 
     Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        traits: np.ndarray of shape (S, T) where S = species, T = traits
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+        traits: pd.DataFrame of shape (S, T) where S = species, T = traits
 
     Returns:
-        FRic (float) or None if not enough species to form a convex hull
+        FRic: pd.DataFrame contains FRic index for each plot
+              NaN if T >= S   
     """
-    pID = []
+
+    # Calculate relative abundances if not specified
+    if not relative_abundance:
+        sp_loc = calculate_relative_abundance(sp_loc)
+
+    if "Species" in traits.columns:
+        traits = traits.set_index("Species")
+
+    if standardise_traits:
+        scaler = StandardScaler()
+        traits = pd.DataFrame(
+            scaler.fit_transform(traits),
+            index = traits.index,
+            columns = traits.columns)
+
+    pIDs = []
     Frich = []
 
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
+    for pID in sp_loc.index:
 
-    for i, species in enumerate(species_PID):
-        pid = species_PID.index[i]
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
         
-        # Select traits for species
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
+        valid_species = traits.index.intersection(present_species)
 
-        n_species, n_traits = np.array(traits_sub).shape
+        traits_sub = traits.loc[valid_species].copy()
 
-        if n_species <= n_traits  or n_species < 3:
-            # FEve undefined for <2 species
+        n_species, n_traits = traits_sub.shape
+
+        if n_species <= n_traits or n_species < 3:
+            # FRic undefined for <2 species
             Frich.append(np.nan)
-            pID.append(pid)
-            
-            continue  # will automatically go to the next iteration
-        # Scale traits
-        traits_scaled = StandardScaler().fit_transform(traits_sub)
+            pIDs.append(pID)
+            continue 
 
-        n_species, n_traits = traits_scaled.shape
-
-        hull = ConvexHull(traits_scaled)
+        hull = ConvexHull(traits_sub)
         FRic = hull.volume
-        Frich.append(FRic)
-        pID.append(pid)
 
+        pIDs.append(pID)
+        Frich.append(FRic)
     
-    FRich_df= pd.DataFrame({"PID": pID, "Functional_Richness": Frich})
+    FRich_df = pd.DataFrame({"PID": pIDs, "Functional_Richness": Frich})
 
     return FRich_df
 
-
-def Frich_Intersect(hull1, hull2, n_samples: int = 100000) -> float:
+def frich_intersect(hull1, hull2, n_samples: int = 100000) -> float:
     """
     GPT GENERATED REQUIRES MORE VERIFICATION
     Compute approximate Functional Volume Intersection (FRic_intersect) 
@@ -113,8 +123,7 @@ def Frich_Intersect(hull1, hull2, n_samples: int = 100000) -> float:
     FRic_intersect = intersection_fraction / union_fraction if union_fraction > 0 else 0
     return FRic_intersect
 
-
-def Functional_Evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, Relative_abundance: bool = False) -> pd.DataFrame:
+def functional_evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, distance_matrix: pd.DataFrame, relative_abundance: bool = False) -> pd.DataFrame:
     """
     Compute Functional Evenness (FEve) using the MST approach (Villéger et al., 2008)
     for presence/absence data.
@@ -122,24 +131,26 @@ def Functional_Evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, Relative_abu
     Args:
         sp_loc: Pivot table of Plot IDs and Species
         traits: dataframe of functional traits (rows=species, columns=traits), must have column "Species"
+        distance_matrix: pre-computed distance matrix 
 
     Returns:
         FEve_df: DataFrame with PID and Functional Evenness
     """
-    pID = []
+    pIDs = []
     FEven = []
 
     # Get species present in each PID
     species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
+    print(species_PID)
     for pid, species in zip(species_PID.index,species_PID):
-   
+        print(pid)
+        print(species)
         S = len(species)
 
         if S < 3:
-            # FEve undefined for <2 species
+            # FEve undefined for < 3 species
             FEven.append(np.nan)
-            pID.append(pid)
+            pIDs.append(pid)
             
             continue
 
@@ -158,7 +169,7 @@ def Functional_Evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, Relative_abu
         EW_list = []
         
 
-        if Relative_abundance:
+        if relative_abundance:
             ab= sp_loc[sp_loc.index == pid]
             ab = ab[[c for c in species if c in ab.columns]]
 
@@ -182,13 +193,13 @@ def Functional_Evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, Relative_abu
         FEve = np.sum(np.minimum(PEW, 1 / (S - 1))) / (1 - 1 / (S - 1))
 
         FEven.append(FEve)
-        pID.append(pid)
+        pIDs.append(pid)
         
 
-    FEve_df = pd.DataFrame({"PID": pID, "Functional_Evenness": FEven})
+    FEve_df = pd.DataFrame({"PID": pIDs, "Functional_Evenness": FEven})
     return FEve_df
 
-def Functional_Divergence(sp_loc:pd.DataFrame, traits: pd.DataFrame) -> pd.DataFrame:
+def functional_divergence(sp_loc:pd.DataFrame, traits: pd.DataFrame) -> pd.DataFrame:
     """
     Compute Functional Divergence (FDiv).
 
@@ -251,7 +262,7 @@ def Functional_Divergence(sp_loc:pd.DataFrame, traits: pd.DataFrame) -> pd.DataF
     return FDiv_df
 
 
-def Functional_Dispersion(sp_loc:pd.DataFrame, traits: np.ndarray, weighted: bool=False) -> pd.DataFrame:
+def functional_dispersion(sp_loc:pd.DataFrame, traits: np.ndarray, weighted: bool=False) -> pd.DataFrame:
     """
     Compute Functional Dispersion (FDis) for a community.
 
@@ -314,7 +325,7 @@ def Functional_Dispersion(sp_loc:pd.DataFrame, traits: np.ndarray, weighted: boo
 
 
 
-def Raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
+def raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
     """
     Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
 

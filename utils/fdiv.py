@@ -29,20 +29,37 @@ Functional dispersion (FDis)
 Rao's Quadratic Entropy (RaoQ)
 
 """
-def functional_richness(sp_loc: pd.DataFrame, traits: pd.DataFrame, relative_abundance: bool = False, standardise_traits = True) -> pd.DataFrame:
+def functional_richness(sp_loc: pd.DataFrame, traits: pd.DataFrame, relative_abundance: bool = False, standardize_traits = True) -> pd.DataFrame:
     """
     Compute Functional Richness (FRic) as the volume of the convex hull
-    in standardised trait space.
+    in standardized trait space.
 
     Args:
         sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
-        traits: pd.DataFrame of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the traits DataFrame "traits.index"
+            - Values: Abundance of each species in the corresponding plot
+        
+        traits (pd.DataFrame): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True. 
+            If False, relative abundances will be calculated from absolute abundances. 
+
+        standardize_traits (bool, default=True): if True, traits will be standardized to mean=0 and std=1 before computing FRic.
 
     Returns:
-        FRic: pd.DataFrame contains FRic index for each plot
-              NaN if T >= S   
-    """
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Functional_Richness": Functional Richness (FRic) value for each plot
 
+    Notes: 
+    """
+    # Pre-checks
     # Calculate relative abundances if not specified
     if not relative_abundance:
         sp_loc = calculate_relative_abundance(sp_loc)
@@ -50,42 +67,47 @@ def functional_richness(sp_loc: pd.DataFrame, traits: pd.DataFrame, relative_abu
     if "Species" in traits.columns:
         traits = traits.set_index("Species")
 
-    if standardise_traits:
+    # Standardize traits globaly 
+    if standardize_traits:
         scaler = StandardScaler()
         traits = pd.DataFrame(
             scaler.fit_transform(traits),
-            index = traits.index,
-            columns = traits.columns)
+            index=traits.index,
+            columns=traits.columns)
 
     pIDs = []
-    Frich = []
+    FRic_list = []
 
+    # Core loop over each plot
     for pID in sp_loc.index:
-
+        # Get species present in the plot (have non-zero abundance)
         site_row = sp_loc.loc[pID]
         present_species = site_row[site_row > 0].index
         
+        # Subset the species in the traits DataFrame to only those present in the plot
         valid_species = traits.index.intersection(present_species)
 
+        # Subset the traits DataFrame to only include the valid species
         traits_sub = traits.loc[valid_species].copy()
 
         n_species, n_traits = traits_sub.shape
 
+        # Edge Cases:
+        # Number of species must exceed number of traits for convex hull to be defined
+        # In the case of 2D traits, at least 3 species are needed to form a convex hull
         if n_species <= n_traits or n_species < 3:
-            # FRic undefined for <2 species
-            Frich.append(np.nan)
+            FRic_list.append(np.nan)
             pIDs.append(pID)
             continue 
 
+        # Compute the convex hull and its volume
         hull = ConvexHull(traits_sub)
         FRic = hull.volume
 
         pIDs.append(pID)
-        Frich.append(FRic)
-    
-    FRich_df = pd.DataFrame({"PID": pIDs, "Functional_Richness": Frich})
+        FRic_list.append(FRic)
 
-    return FRich_df
+    return pd.DataFrame({"PID": pIDs, "Functional_Richness": FRic_list})
 
 def frich_intersect(hull1, hull2, n_samples: int = 100000) -> float:
     """
@@ -325,7 +347,7 @@ def functional_dispersion(sp_loc:pd.DataFrame, traits: np.ndarray, weighted: boo
 
 
 
-def raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
+def raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame:
     """
     Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
 
@@ -383,7 +405,7 @@ def raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
 
     return RQ_df
 
-def MPD(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
+def MPD(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame:
     pID = []
     mpd_list = []
 

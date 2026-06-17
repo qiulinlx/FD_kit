@@ -1,4 +1,7 @@
 import json
+import pandas as pd
+
+from sklearn.preprocessing import StandardScaler
 """
 Additional Functions that is used for generation etc. 
 """
@@ -31,3 +34,23 @@ def truncate_after_n_underscores(s: str, n: int = 4) -> str:
     """
     parts = s.split("_")
     return "_".join(parts[:n])
+
+def standardize_trait_matrix(trait_matrix: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize the trait matrix to have mean 0 and variance 1 for each trait.
+
+    Args:
+        trait_matrix (pd.DataFrame): DataFrame with species as rows and traits as columns.
+
+    Returns:
+        pd.DataFrame: Standardized trait matrix.
+    """
+
+    scaler = StandardScaler()
+    standardized_traits = pd.DataFrame(
+        scaler.fit_transform(trait_matrix),
+        index=trait_matrix.index,
+        columns=trait_matrix.columns
+    )
+    
+    return standardized_traits

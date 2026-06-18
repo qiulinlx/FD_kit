@@ -280,8 +280,10 @@ def functional_divergence(
         traits_sub = traits.loc[valid_species].values
         abundances = site_row[valid_species].values
 
-        # Compute community centroid
-        centroid = np.mean(traits_sub, axis=0)
+        # Compute centroid based on vertices of the convex hull (Villéger et al., 2008)
+        hull = ConvexHull(traits_sub)
+        hull_vertices = traits_sub[hull.vertices]
+        centroid = np.mean(hull_vertices, axis=0)
 
         # Compute distances from centroid (Euclidean distance)
         distances = np.linalg.norm(traits_sub - centroid, axis=1)

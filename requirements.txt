@@ -1,4 +1,4 @@
-torch 
+torch
 numpy
 pandas
 scikit-learn
@@ -11,3 +11,4 @@ geopandas
 shapely
 pyproj
 pyyaml
+pre-commit

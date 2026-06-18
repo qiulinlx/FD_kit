@@ -1,37 +1,37 @@
 # FD Kit
 
 
-A collection of Python functions and tools for exploring ecological and trait-based data. 
-Includes utilities for calculating functional diversity metrics (FRic, FEve, FDiv, FDis, RaoQ) 
+A collection of Python functions and tools for exploring ecological and trait-based data.
+Includes utilities for calculating functional diversity metrics (FRic, FEve, FDiv, FDis, RaoQ)
 and performing data preprocessing for further analysis.
 
 ## Papers to Read
 
 - Botta-Dukát, Z. (2005), Rao's quadratic entropy as a measure of functional diversity based on multiple traits. Journal of Vegetation Science, 16: 533-540. https://doi.org/10.1111/j.1654-1103.2005.tb02393.x
-- Laliberté, E. and Legendre, P. (2010), A distance-based framework for measuring functional diversity from multiple traits. Ecology, 91: 299-305. https://doi.org/10.1890/08-2244.1 
-- Mouchet, M.A., Villéger, S., Mason, N.W.H. and Mouillot, D. (2010), Functional diversity measures: an overview of their redundancy and their ability to discriminate community assembly rules. Functional Ecology, 24: 867-876. https://doi.org/10.1111/j.1365-2435.2010.01695.x 
-- Villéger, S., Mason, N.W.H. and Mouillot, D. (2008), NEW MULTIDIMENSIONAL FUNCTIONAL DIVERSITY INDICES FOR A MULTIFACETED FRAMEWORK IN FUNCTIONAL ECOLOGY. Ecology, 89: 2290-2301. https://doi.org/10.1890/07-1206.1 
+- Laliberté, E. and Legendre, P. (2010), A distance-based framework for measuring functional diversity from multiple traits. Ecology, 91: 299-305. https://doi.org/10.1890/08-2244.1
+- Mouchet, M.A., Villéger, S., Mason, N.W.H. and Mouillot, D. (2010), Functional diversity measures: an overview of their redundancy and their ability to discriminate community assembly rules. Functional Ecology, 24: 867-876. https://doi.org/10.1111/j.1365-2435.2010.01695.x
+- Villéger, S., Mason, N.W.H. and Mouillot, D. (2008), NEW MULTIDIMENSIONAL FUNCTIONAL DIVERSITY INDICES FOR A MULTIFACETED FRAMEWORK IN FUNCTIONAL ECOLOGY. Ecology, 89: 2290-2301. https://doi.org/10.1890/07-1206.1
 
-## Things to do: 
-- Write a test script / Notebook 
+## Things to do:
+- Write a test script / Notebook
 - Documentation
-- Clean up utils file. Remove what is not necessary 
-- Add docstrings to each function 
+- Clean up utils file. Remove what is not necessary
+- Add docstrings to each function
 - Add additional arguments for each argument
 
 ### Short write up
 
- Write out an example.ipynb illustrating how the code in this repository runs. Include answers the following questions in the notebook. 
+ Write out an example.ipynb illustrating how the code in this repository runs. Include answers the following questions in the notebook.
 
-1. What are functional traits? 
+1. What are functional traits?
 
 2. What differentiates Functional Diversity and Species Diversity
 
-3. What is the importance of converting an R package to a python package? 
+3. What is the importance of converting an R package to a python package?
 
-### Bonus 
+### Bonus
 
-Have a look at [FDiv](https://search.r-project.org/CRAN/refmans/fundiversity/html/fd_fdiv.html). Can you compare the two? 
+Have a look at [FDiv](https://search.r-project.org/CRAN/refmans/fundiversity/html/fd_fdiv.html). Can you compare the two?
 
 
 ## Table of Contents
@@ -47,7 +47,7 @@ Have a look at [FDiv](https://search.r-project.org/CRAN/refmans/fundiversity/htm
 1. Clone the repository:
 
 ```bash
-git clone  https://github.com/qiulinlx/FD_Playground.git 
+git clone  https://github.com/qiulinlx/FD_Playground.git
 
 ```
 
@@ -87,4 +87,3 @@ Contributions are welcome! Please open an issue or submit a pull request.
 ## License
 
 MIT License
-

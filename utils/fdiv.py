@@ -298,7 +298,7 @@ def functional_divergence(
         FDiv_values.append(FDiv)
         pIDs.append(pID)
 
-    return pd.DataFrame({"PID": pIDs, "Functional_Divergences": FDiv_values})
+    return pd.DataFrame({"PID": pIDs, "Functional_Divergence": FDiv_values})
 
 
 def functional_dispersion(

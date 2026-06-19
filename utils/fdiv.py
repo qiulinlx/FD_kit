@@ -66,6 +66,11 @@ def functional_richness(
             - "Functional_Richness": Functional Richness (FRic) value for each plot
 
     Notes:
+        Trait standardization is done globally across all species, not per plot.
+
+        FRic is undefined for plots with fewer species than traits (S <= T) or fewer than 3 species (S < 3).
+
+        For a single trait (1D), FRic is the range of trait values (max - min) for species present in the plot.
     """
     # Pre-checks
     if "Species" in traits.columns:
@@ -103,9 +108,13 @@ def functional_richness(
             pIDs.append(pID)
             continue
 
-        # Compute the convex hull and its volume
-        hull = ConvexHull(traits_sub)
-        FRic = hull.volume
+        if n_traits == 1:
+            # For a single trait, FRic is the range of trait values (max - min)
+            FRic = traits_sub.values.max() - traits_sub.values.min()
+        else:
+            # For multi-dimensional traits, compute the convex hull and its volume
+            hull = ConvexHull(traits_sub.values)
+            FRic = hull.volume
 
         pIDs.append(pID)
         FRic_list.append(FRic)
@@ -243,7 +252,7 @@ def functional_divergence(
     Returns:
         pd.DataFrame: Dataframe containing two columns:
             - "PID": Plot Identifier
-            - "Functional_Richness": Functional Richness (FRic) value for each plot
+            - "Functional_Divergence": Functional Divergence (FDiv) value for each plot
 
     Notes:
         - FDiv is undefined for plots with fewer than 3 species.
@@ -360,6 +369,7 @@ def functional_dispersion(
     pIDs = []
     FDis_values = []
 
+    # Core loop over each plot
     for pID in sp_loc.index:
         # Get species present in the plot (have non-zero abundance)
         site_row = sp_loc.loc[pID]
@@ -375,18 +385,18 @@ def functional_dispersion(
             pIDs.append(pID)
             continue
 
-        # Subset traits and abundances for present species
+        # Subset traits for present species
         traits_sub = traits.loc[valid_species].values
 
         if weighted:
+            # Use abundance-weighted centroid
             abundances = site_row[valid_species].values
 
-            centroid = np.sum(
-                traits_sub * abundances[:, None], axis=0
-            )  # Abundance-weighted centroid
+            centroid = np.sum(traits_sub * abundances[:, None], axis=0)
 
         else:
-            centroid = np.mean(traits_sub, axis=0)  # Unweighted centroid
+            # Use unweighted centroid
+            centroid = np.mean(traits_sub, axis=0)
 
         # Distances from centroid
         distances = np.linalg.norm(traits_sub - centroid, axis=1)
@@ -413,7 +423,16 @@ def raos_Q(
 
     Args:
         sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
-        distance_matrix (pd.DataFrame): Distance matrix of shape (S, S)
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the distance_matrix DataFrame "distance_matrix.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        distance_matrix (pd.DataFrame): pre-computed distance matrix
+            Structure:
+            - Species x Species distance matrix (square form)
+            - Row and Column Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+
         relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
             If False, relative abundances will be calculated from absolute abundances.
 
@@ -430,6 +449,7 @@ def raos_Q(
     pIDs = []
     RaosQ_values = []
 
+    # Core loop over each plot
     for pID in sp_loc.index:
         # Get species present in the plot (have non-zero abundance)
         site_row = sp_loc.loc[pID]
@@ -440,6 +460,8 @@ def raos_Q(
 
         S = len(valid_species)
 
+        # Edge Cases:
+        # Rao's Q is undefined for <2 species
         if S < 2:
             RaosQ_values.append(np.nan)
             pIDs.append(pID)
@@ -452,6 +474,7 @@ def raos_Q(
         rel_abundances = site_row[valid_species].values
 
         # Compute Rao's Quadratic Entropy
+        # Formula = rel_abundances^T * (dist_matrix^2) * rel_abundances
         RaoQ = np.sum(
             (dist_matrix.values**2) * np.outer(rel_abundances, rel_abundances)
         )

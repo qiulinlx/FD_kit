@@ -50,24 +50,3 @@ print("Functional Dispersion:\n", FDis)
 
 raos_Q_df = raos_Q(abundances, distance_matrix_euclidean, relative_abundance=False)
 print("Rao's Quadratic Entropy:\n", raos_Q_df)
-
-
-tree_loc = pd.read_csv("./data/example/trees/tree_location.csv", index_col=0)
-tree_traits = pd.read_csv("./data/example/trees/tree_traits.csv", index_col=0)
-
-FRic_tree = functional_richness(
-    tree_loc, tree_traits, relative_abundance=False, standardize_traits_method="z_score"
-)
-
-distance_matrix_euclidean_tree = euclidean_distance(tree_traits)
-
-FEve_tree = functional_evenness(
-    tree_loc,
-    distance_matrix_euclidean_tree,
-    relative_abundance=False,
-    abundance_weighted=True,
-)
-
-FDiv_tree = functional_divergence(
-    tree_loc, tree_traits, relative_abundance=False, standardize_traits_method="z_score"
-)

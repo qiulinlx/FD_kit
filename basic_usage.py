@@ -1,7 +1,14 @@
 import pandas as pd
 
-from utils import functional_richness, functional_evenness, functional_divergence
-from utils import calculate_relative_abundance, euclidean_distance
+from utils import calculate_relative_abundance
+from utils import euclidean_distance
+from utils import (
+    functional_richness,
+    functional_evenness,
+    functional_divergence,
+    raos_Q,
+    functional_dispersion,
+)
 
 traits = pd.DataFrame(
     [[1, 2], [2, 3], [3, 1], [4, 2]],
@@ -17,12 +24,14 @@ abundances = pd.DataFrame(
 
 relative_abundances = calculate_relative_abundance(abundances)
 
-FRic = functional_richness(abundances, traits, relative_abundance=False)
+FRic = functional_richness(
+    abundances, traits, relative_abundance=False, standardize_traits_method="z_score"
+)
 
 print("Functional Richness:\n", FRic)
 
 distance_matrix_euclidean = euclidean_distance(
-    traits, metric="euclidean", standardize=True
+    traits, metric="euclidean", standardize_method="z_score"
 )
 
 FEve = functional_evenness(
@@ -31,28 +40,34 @@ FEve = functional_evenness(
 print("Functional Evenness:\n", FEve)
 
 FDiv = functional_divergence(abundances, traits)
-
 print("Functional Divergence:\n", FDiv)
 
-
-bird_loc = pd.read_csv("./data/example/bird/bird_location.csv")
-bird_traits = pd.read_csv("./data/example/bird/bird_traits.csv")
-
-bird_loc = bird_loc.set_index("PID")
-bird_traits = bird_traits.set_index("Species")
-
-FRic = functional_richness(bird_loc, bird_traits, relative_abundance=False)
-print(FRic)
-
-distance_matrix_euclidean = euclidean_distance(
-    bird_traits, metric="euclidean", standardize=True
+FDis = functional_dispersion(
+    abundances, traits, relative_abundance=False, standardize_traits_method="z_score"
 )
-FEve = functional_evenness(
-    bird_loc, distance_matrix_euclidean, relative_abundance=False
+print("Functional Dispersion:\n", FDis)
+
+
+raos_Q_df = raos_Q(abundances, distance_matrix_euclidean, relative_abundance=False)
+print("Rao's Quadratic Entropy:\n", raos_Q_df)
+
+
+tree_loc = pd.read_csv("./data/example/trees/tree_location.csv", index_col=0)
+tree_traits = pd.read_csv("./data/example/trees/tree_traits.csv", index_col=0)
+
+FRic_tree = functional_richness(
+    tree_loc, tree_traits, relative_abundance=False, standardize_traits_method="z_score"
 )
 
-print(FEve)
+distance_matrix_euclidean_tree = euclidean_distance(tree_traits)
 
-FDiv = functional_divergence(bird_loc, bird_traits)
+FEve_tree = functional_evenness(
+    tree_loc,
+    distance_matrix_euclidean_tree,
+    relative_abundance=False,
+    abundance_weighted=True,
+)
 
-print(FDiv)
+FDiv_tree = functional_divergence(
+    tree_loc, tree_traits, relative_abundance=False, standardize_traits_method="z_score"
+)

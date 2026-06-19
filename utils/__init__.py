@@ -1,4 +1,10 @@
-from .fdiv import functional_richness, functional_evenness, functional_divergence
+from .fdiv import (
+    functional_richness,
+    functional_evenness,
+    functional_divergence,
+    functional_dispersion,
+    raos_Q,
+)
 from .preprocessing import (
     calculate_relative_abundance,
     euclidean_distance,
@@ -9,6 +15,8 @@ __all__ = [
     "functional_richness",
     "functional_evenness",
     "functional_divergence",
+    "functional_dispersion",
+    "raos_Q",
     "calculate_relative_abundance",
     "euclidean_distance",
     "standardize_trait_matrix",

@@ -293,6 +293,12 @@ def functional_divergence(
         traits_sub = traits.loc[valid_species].values
         abundances = site_row[valid_species].values
 
+        # If the number of species is less than the number of traits, FDiv is undefined
+        if S < traits_sub.shape[1]:
+            FDiv_values.append(np.nan)
+            pIDs.append(pID)
+            continue
+
         # Compute centroid based on vertices of the convex hull (Villéger et al., 2008)
         hull = ConvexHull(traits_sub)
         hull_vertices = traits_sub[hull.vertices]
@@ -475,8 +481,9 @@ def raos_Q(
 
         # Compute Rao's Quadratic Entropy
         # Formula = rel_abundances^T * (dist_matrix^2) * rel_abundances
-        RaoQ = np.sum(
-            (dist_matrix.values**2) * np.outer(rel_abundances, rel_abundances)
+        RaoQ = (
+            np.sum((dist_matrix.values**2) * np.outer(rel_abundances, rel_abundances))
+            / 2
         )
 
         RaosQ_values.append(RaoQ)

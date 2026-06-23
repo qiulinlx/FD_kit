@@ -3,7 +3,7 @@ import numpy as np
 
 from scipy.spatial.distance import pdist, squareform
 
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler
 
 
 # --- Abundance calculation functions ---
@@ -54,12 +54,17 @@ def standardize_trait_matrix_z_score(trait_matrix: pd.DataFrame) -> pd.DataFrame
     Returns:
         pd.DataFrame: Standardized trait matrix.
     """
+    # The StandardScaler uses the population standard deviation (ddof=0) by default
 
-    scaler = StandardScaler()
-    standardized_traits = pd.DataFrame(
-        scaler.fit_transform(trait_matrix),
-        index=trait_matrix.index,
-        columns=trait_matrix.columns,
+    # scaler = StandardScaler()
+    # standardized_traits = pd.DataFrame(
+    #     scaler.fit_transform(trait_matrix),
+    #     index=trait_matrix.index,
+    #     columns=trait_matrix.columns,
+    # )
+    # We use the sample standard deviation (ddof=1) for our calculations.
+    standardized_traits = (trait_matrix - trait_matrix.mean()) / trait_matrix.std(
+        ddof=1
     )
 
     return standardized_traits

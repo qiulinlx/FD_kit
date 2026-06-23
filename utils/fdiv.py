@@ -325,7 +325,7 @@ def functional_divergence(
 def functional_dispersion(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame,
-    weighted: bool = False,
+    weighted: bool = True,
     relative_abundance: bool = False,
     standardize_traits_method: str = None,
 ) -> pd.DataFrame:

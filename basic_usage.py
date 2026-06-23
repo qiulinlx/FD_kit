@@ -9,6 +9,12 @@ from utils import (
     raos_Q,
     functional_dispersion,
 )
+from utils import (
+    species_richness,
+    shannon_diversity,
+    shannon_equitability,
+    simpsons_index,
+)
 
 traits = pd.DataFrame(
     [[1, 2], [2, 3], [3, 1], [4, 2]],
@@ -50,3 +56,16 @@ print("Functional Dispersion:\n", FDis)
 
 raos_Q_df = raos_Q(abundances, distance_matrix_euclidean, relative_abundance=False)
 print("Rao's Quadratic Entropy:\n", raos_Q_df)
+
+
+shannon_diversity_df = shannon_diversity(abundances)
+print("Shannon Diversity:\n", shannon_diversity_df)
+
+species_richness_df = species_richness(abundances)
+print("Species Richness:\n", species_richness_df)
+
+shannon_equitability_df = shannon_equitability(abundances)
+print("Shannon Equitability:\n", shannon_equitability_df)
+
+simpsons_index_df = simpsons_index(abundances)
+print("Simpson's Index:\n", simpsons_index_df)

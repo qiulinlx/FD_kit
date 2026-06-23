@@ -1,39 +1,30 @@
 import pandas as pd
-import math
+import numpy as np
+
+from .preprocessing import calculate_relative_abundance
 
 
 def species_richness(sp_loc: pd.DataFrame) -> pd.DataFrame:
-    pID = []
-    Srich = []
+    pIDs = sp_loc.index.copy()
+    SRic = np.sum(sp_loc > 0, axis=1)
 
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for i, species in enumerate(species_PID):
-        pid = species_PID.index[i]
-        Srich.append(len(species))
-        pID.append(pid)
-
-    return pd.DataFrame({"PID": pID, "Species Richness": Srich})
+    return pd.DataFrame({"PID": pIDs, "Species Richness": SRic})
 
 
-def shannon_diversity(sp_loc):
-    pID = []
-    shannon = []
+def shannon_diversity(sp_loc: pd.DataFrame):
 
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
+    pIDs = sp_loc.index.copy()
 
-    for pid, species in zip(species_PID.index, species_PID):
-        ab = sp_loc[sp_loc.index == pid]
-        ab = ab.to_numpy().flatten()
-        ab = ab[ab > 0]
-        ab = ab / ab.sum()
-        total = -sum(x * math.log(x) for x in ab)
-        shannon.append(total)
-        pID.append(pid)
+    relative_abundance = calculate_relative_abundance(sp_loc).values
 
-    shannon_df = pd.DataFrame({"PID": pID, "Shannon Diversity": shannon})
+    valid_abundances = relative_abundance > 0
 
-    return shannon_df
+    log_p = np.zeros_like(relative_abundance)
+    log_p[valid_abundances] = np.log(relative_abundance[valid_abundances])
+
+    shannon_values = -np.sum(relative_abundance * log_p, axis=1)
+
+    return pd.DataFrame({"PID": pIDs, "Shannon Diversity": shannon_values})
 
 
 def simpsons_index(sp_loc):
@@ -42,48 +33,43 @@ def simpsons_index(sp_loc):
 
     Measure of Dominance /
     """
+    pIDs = sp_loc.index.copy()
 
-    pID = []
-    simpsons = []
+    total = np.sum(sp_loc * (sp_loc - 1), axis=1)
 
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
+    N = np.sum(sp_loc, axis=1)
+    N_sum = N * (N - 1)
 
-    for pid, species in zip(species_PID.index, species_PID):
-        ab = sp_loc[sp_loc.index == pid]
-        ab = ab.to_numpy().flatten()
-        ab = ab[ab > 0]
-        total = sum(x * (x - 1) for x in ab)
-        total = 1 - (total / (ab.sum() * (ab.sum() - 1)))
-        simpsons.append(total)
-        pID.append(pid)
+    simpsons_values = 1 - (total / N_sum)
 
-    simpsons_df = pd.DataFrame({"PID": pID, "Simpson's Index": simpsons})
-
-    return simpsons_df
+    return pd.DataFrame({"PID": pIDs, "Simpson's Index": simpsons_values})
 
 
-def shannon_equitability(sp_loc):
+def shannon_equitability(sp_loc: pd.DataFrame):
     """
     Also known as Pielou's Evenness. Measure of Evennes
     Calculate the Shannon Equivalence (also known as the Effective Number of Species)
 
     """
-    pID = []
-    shannon = []
+    relative_abundance = calculate_relative_abundance(sp_loc).values
+    pIDs = sp_loc.index.copy()
 
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
+    S = np.sum(sp_loc > 0, axis=1)
 
-    for pid, species in zip(species_PID.index, species_PID):
-        S = len(species)
-        ab = sp_loc[sp_loc.index == pid]
-        ab = ab.to_numpy().flatten()
-        ab = ab[ab > 0]
-        ab = ab / ab.sum()
-        total = -sum(x * math.log(x) for x in ab)
-        equitabiilty = total / math.log(S) if S > 1 else 0
-        shannon.append(equitabiilty)
-        pID.append(pid)
+    valid_abundances = relative_abundance > 0
 
-    shannon_equi_df = pd.DataFrame({"PID": pID, "Shannon Equitabiltiy Index": shannon})
+    log_p = np.zeros_like(relative_abundance)
+    log_p[valid_abundances] = np.log(relative_abundance[valid_abundances])
 
-    return shannon_equi_df
+    shannon_values = -np.sum(relative_abundance * log_p, axis=1)
+
+    shannon_equitability_values = np.zeros_like(shannon_values)
+
+    valid_richness = S > 0
+    shannon_equitability_values[valid_richness] = shannon_values[
+        valid_richness
+    ] / np.log(S[valid_richness])
+
+    return pd.DataFrame(
+        {"PID": pIDs, "Shannon Equitabiltiy Index": shannon_equitability_values}
+    )

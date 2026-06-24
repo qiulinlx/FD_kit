@@ -7,9 +7,9 @@ from scipy.spatial import Delaunay
 
 from networkx import from_numpy_array, minimum_spanning_tree
 
-from .preprocessing import calculate_relative_abundance
+from .preprocessing import compute_relative_abundance
 from .preprocessing import standardize_trait_matrix
-from .preprocessing import euclidean_distance
+from .preprocessing import compute_distance_matrix
 
 
 """
@@ -24,7 +24,7 @@ Functional volume intersections (FRic_intersect),
 def functional_richness(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame,
-    relative_abundance: bool = False,
+    calculate_relative_abundance: bool = True,
     standardize_traits_method: str = None,
     local_standardization: bool = False,
 ) -> pd.DataFrame:
@@ -45,8 +45,8 @@ def functional_richness(
             - Columns: Trait names
             - Values: Trait values for each species (must be continuous numeric values)
 
-        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
-            If False, relative abundances will be calculated from absolute abundances.
+        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
+            If True, relative abundances will be calculated from absolute abundances.
 
         standardize_traits_method (str, default=None): Method for standardising traits.
             - "z_score": standardize traits to mean=0 and var=1 before computing FRic.
@@ -72,12 +72,16 @@ def functional_richness(
         traits = traits.set_index("Species")
 
     # Calculate relative abundances if not specified
-    if not relative_abundance:
-        sp_loc = calculate_relative_abundance(sp_loc)
+    if calculate_relative_abundance:
+        sp_loc = compute_relative_abundance(sp_loc)
 
     # Standardize traits globaly
-    if not local_standardization:
-        traits = standardize_trait_matrix(traits, method=standardize_traits_method)
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
 
     pIDs = []
     FRic_list = []
@@ -89,10 +93,10 @@ def functional_richness(
         present_species = site_row[site_row > 0].index
 
         # Subset the species in the traits DataFrame to only those present in the plot
-        valid_species = traits.index.intersection(present_species)
+        valid_species = traits_processed.index.intersection(present_species)
 
         # Subset the traits DataFrame to only include the valid species
-        traits_sub = traits.loc[valid_species].copy()
+        traits_sub = traits_processed.loc[valid_species].copy()
 
         n_species, n_traits = traits_sub.shape
 
@@ -127,7 +131,6 @@ def functional_evenness(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame = None,  # use when local_standardization is True
     distance_matrix: pd.DataFrame = None,  # use when local_standardization is False
-    relative_abundance: bool = False,
     abundance_weighted: bool = True,
     local_standardization: bool = False,
     standardize_traits_method: str = None,
@@ -154,11 +157,8 @@ def functional_evenness(
             - Species x Species distance matrix (square form)
             - Row and Column Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
 
-        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
-            If False, relative abundances will be calculated from absolute abundances.
-
-        abundance_weighted (bool, default=True): whether to weight edges by abundances.
-            True -  each edge in the MST will be weighted by the relativeabundances of the species it connects.
+        abundance_weighted (bool, default=True): whether to weight edges by relative abundances. Is also used to compute the relative abundances.
+            True  - each edge in the MST will be weighted by the relativeabundances of the species it connects.
             False - all edges in the MST will be weighted equally as 1/S.
 
         local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
@@ -180,22 +180,19 @@ def functional_evenness(
     """
 
     # Pre-checks
-    if not relative_abundance:
-        sp_loc = calculate_relative_abundance(sp_loc)
+    if abundance_weighted:
+        sp_loc = compute_relative_abundance(sp_loc)
 
-    if not local_standardization:
+    if local_standardization and traits is None:
+        raise ValueError("traits must be provided when local_standardization is True.")
+    else:
         if distance_matrix is None:
             if traits is None:
                 raise ValueError("Either distance_matrix or traits must be provided.")
-            distance_matrix = euclidean_distance(
+            distance_matrix = compute_distance_matrix(
                 traits,
                 metric=distance_metric,
                 standardize_method=standardize_traits_method,
-            )
-    else:
-        if traits is None:
-            raise ValueError(
-                "traits must be provided when local_standardization is True."
             )
 
     pIDs = []
@@ -207,20 +204,19 @@ def functional_evenness(
         site_row = sp_loc.loc[pID]
         present_species = site_row[site_row > 0].index
 
-        # Subset the species in the distance matrix to only those present in the plot
-        valid_species = distance_matrix.index.intersection(present_species)
-
         if local_standardization:
+            valid_species = traits.index.intersection(present_species)
             # Subset traits for present species
             traits_sub = traits.loc[valid_species].copy()
 
             # Compute distance matrix for the standardized traits
-            valid_dist_matrix = euclidean_distance(
+            valid_dist_matrix = compute_distance_matrix(
                 traits_sub,
                 metric=distance_metric,
                 standardize_method=standardize_traits_method,
-            )
+            ).values
         else:
+            valid_species = distance_matrix.index.intersection(present_species)
             valid_dist_matrix = distance_matrix.loc[valid_species, valid_species].values
 
         S = len(valid_species)
@@ -267,7 +263,7 @@ def functional_evenness(
 def functional_divergence(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame,
-    relative_abundance: bool = False,
+    calculate_relative_abundance: bool = True,
     standardize_traits_method: str = None,
     local_standardization: bool = False,
 ) -> pd.DataFrame:
@@ -287,8 +283,8 @@ def functional_divergence(
             - Columns: Trait names
             - Values: Trait values for each species (must be continuous numeric values)
 
-        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
-            If False, relative abundances will be calculated from absolute abundances.
+        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
+            If True, relative abundances will be calculated from absolute abundances.
 
         standardize_traits_method (str, default=None): Method for standardizing traits.
             - "z_score": standardize traits to mean=0 and var=1 before computing FDiv.
@@ -311,11 +307,15 @@ def functional_divergence(
     if "Species" in traits.columns:
         traits = traits.set_index("Species")
 
-    if not relative_abundance:
-        sp_loc = calculate_relative_abundance(sp_loc)
+    if calculate_relative_abundance:
+        sp_loc = compute_relative_abundance(sp_loc)
 
-    if not local_standardization:
-        traits = standardize_trait_matrix(traits, method=standardize_traits_method)
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
 
     pIDs = []
     FDiv_values = []
@@ -327,7 +327,7 @@ def functional_divergence(
         present_species = site_row[site_row > 0].index
 
         # Subset the species in the traits DataFrame to only those present in the plot
-        valid_species = traits.index.intersection(present_species)
+        valid_species = traits_processed.index.intersection(present_species)
 
         S = len(valid_species)
 
@@ -339,12 +339,13 @@ def functional_divergence(
             continue
 
         # Subset traits and abundances for present species
-        traits_sub = traits.loc[valid_species].values
+        traits_sub = traits_processed.loc[valid_species].values
         abundances = site_row[valid_species].values
 
         if local_standardization:
             traits_sub = standardize_trait_matrix(
-                traits_sub, method=standardize_traits_method
+                pd.DataFrame(traits_sub, index=valid_species),
+                method=standardize_traits_method,
             )
 
         # If the number of species is less than the number of traits, FDiv is undefined
@@ -379,8 +380,7 @@ def functional_divergence(
 def functional_dispersion(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame,
-    weighted: bool = True,
-    relative_abundance: bool = False,
+    abundance_weighted: bool = True,
     standardize_traits_method: str = None,
     local_standardization: bool = False,
 ) -> pd.DataFrame:
@@ -403,10 +403,9 @@ def functional_dispersion(
             - Columns: Trait names
             - Values: Trait values for each species (must be continuous numeric values)
 
-        weighted (bool, default=False): If True, compute abundance-weighted FDis. If False, compute unweighted FDis.
-
-        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
-            If False, relative abundances will be calculated from absolute abundances.
+        abundance_weighted (bool, default=True): whether to weight the centroid by relative abundances.
+            True - the centroid is computed as the abundance-weighted mean of species traits.
+            False - the centroid is computed as the unweighted mean of species traits.
 
         standardize_traits_method (str, default=None): Method for standardizing traits.
             - "z_score": standardize traits to mean=0 and var=1 before computing FDis.
@@ -424,11 +423,15 @@ def functional_dispersion(
     if "Species" in traits.columns:
         traits = traits.set_index("Species")
 
-    if not relative_abundance:
-        sp_loc = calculate_relative_abundance(sp_loc)
+    if abundance_weighted:
+        sp_loc = compute_relative_abundance(sp_loc)
 
-    if not local_standardization:
-        traits = standardize_trait_matrix(traits, method=standardize_traits_method)
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
 
     pIDs = []
     FDis_values = []
@@ -440,7 +443,7 @@ def functional_dispersion(
         present_species = site_row[site_row > 0].index
 
         # Subset the species in the traits DataFrame to only those present in the plot
-        valid_species = traits.index.intersection(present_species)
+        valid_species = traits_processed.index.intersection(present_species)
 
         S = len(valid_species)
 
@@ -450,14 +453,14 @@ def functional_dispersion(
             continue
 
         # Subset traits for present species
-        traits_sub = traits.loc[valid_species].values
+        traits_sub = traits_processed.loc[valid_species].values
 
         if local_standardization:
             traits_sub = standardize_trait_matrix(
                 traits_sub, method=standardize_traits_method
             )
 
-        if weighted:
+        if abundance_weighted:
             # Use abundance-weighted centroid
             abundances = site_row[valid_species].values
 
@@ -466,11 +469,11 @@ def functional_dispersion(
             # Use unweighted centroid
             centroid = np.mean(traits_sub, axis=0)
 
-        # Distances from centroid
+        # Compute euclidean distances from centroid
         distances = np.linalg.norm(traits_sub - centroid, axis=1)
 
         # Compute FDis
-        if weighted:
+        if abundance_weighted:
             FDis = np.sum(distances * abundances) / np.sum(abundances)
         else:
             FDis = np.mean(distances)
@@ -485,10 +488,10 @@ def raos_Q(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame = None,  # use when local_standardization is True
     distance_matrix: pd.DataFrame = None,  # use when local_standardization is False
-    relative_abundance: bool = False,
+    calculate_relative_abundance: bool = True,
     local_standardization: bool = False,
     standardize_traits_method: str = None,
-    distance_metric: str = "euclidean",
+    distance_metric: str = None,
 ) -> pd.DataFrame:
     """
     Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
@@ -511,8 +514,8 @@ def raos_Q(
             - Species x Species distance matrix (square form)
             - Row and Column Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
 
-        relative_abundance (bool, default=False): if sp_loc already contains relative abundances, set to True.
-            If False, relative abundances will be calculated from absolute abundances.
+        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
+            If True, relative abundances will be calculated from absolute abundances.
 
         local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
 
@@ -521,7 +524,7 @@ def raos_Q(
             - "min_max": standardize traits to range [0, 1] before computing RaoQ.
             - None: do not standardize traits.
 
-        distance_metric (str, default="euclidean"): distance metric to use for computing the distance matrix.
+        distance_metric (str, default=None): distance metric to use for computing the distance matrix.
 
     Returns:
         pd.DataFrame: Dataframe containing two columns:
@@ -530,22 +533,19 @@ def raos_Q(
     """
 
     # Pre-checks
-    if not relative_abundance:
-        sp_loc = calculate_relative_abundance(sp_loc)
+    if calculate_relative_abundance:
+        sp_loc = compute_relative_abundance(sp_loc)
 
-    if not local_standardization:
+    if local_standardization and traits is None:
+        raise ValueError("traits must be provided when local_standardization is True.")
+    else:
         if distance_matrix is None:
             if traits is None:
                 raise ValueError("Either distance_matrix or traits must be provided.")
-            distance_matrix = euclidean_distance(
+            distance_matrix = compute_distance_matrix(
                 traits,
                 metric=distance_metric,
                 standardize_method=standardize_traits_method,
-            )
-    else:
-        if traits is None:
-            raise ValueError(
-                "traits must be provided when local_standardization is True."
             )
 
     pIDs = []
@@ -557,20 +557,21 @@ def raos_Q(
         site_row = sp_loc.loc[pID]
         present_species = site_row[site_row > 0].index
 
-        # Subset the species in the distance_matrix DataFrame to only those present in the plot
-        valid_species = distance_matrix.index.intersection(present_species)
-
         if local_standardization:
+            # Subset the species in the traits DataFrame to only those present in the plot
+            valid_species = traits.index.intersection(present_species)
             # Subset traits for present species
             traits_sub = traits.loc[valid_species].copy()
 
             # Compute distance matrix for the standardized traits
-            valid_dist_matrix = euclidean_distance(
+            valid_dist_matrix = compute_distance_matrix(
                 traits_sub,
                 metric=distance_metric,
                 standardize_method=standardize_traits_method,
-            )
+            ).values
         else:
+            # Subset the species in the distance matrix to only those present in the plot
+            valid_species = distance_matrix.index.intersection(present_species)
             valid_dist_matrix = distance_matrix.loc[valid_species, valid_species].values
 
         S = len(valid_species)
@@ -586,7 +587,7 @@ def raos_Q(
         rel_abundances = site_row[valid_species].values
 
         # Compute Rao's Quadratic Entropy
-        # Formula = rel_abundances^T * (dist_matrix^2) * rel_abundances
+        # Formula = (rel_abundances^T * (dist_matrix^2) * rel_abundances) / 2
         RaoQ = (
             np.sum((valid_dist_matrix**2) * np.outer(rel_abundances, rel_abundances))
             / 2

@@ -3,18 +3,16 @@ import numpy as np
 
 from scipy.spatial.distance import pdist, squareform
 
-from sklearn.preprocessing import MinMaxScaler
-
 
 # --- Abundance calculation functions ---
 
 
-def calculate_relative_abundance(df: pd.DataFrame) -> pd.DataFrame:
+def compute_relative_abundance(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute relative abundances (%) for a given abundance column.
 
     Args:
-        df: pandas DataFrame with species abundances
+        df (pd.DataFrame): pandas DataFrame with species abundances
             each contains the absolute abundances
 
     Returns:
@@ -44,53 +42,6 @@ def normalize_abundance(abundances: list) -> np.ndarray:
 # --- Trait standardization ---
 
 
-def standardize_trait_matrix_z_score(trait_matrix: pd.DataFrame) -> pd.DataFrame:
-    """
-    Standardize the trait matrix to have mean 0 and variance 1 for each trait.
-
-    Args:
-        trait_matrix (pd.DataFrame): DataFrame with species as rows and traits as columns.
-
-    Returns:
-        pd.DataFrame: Standardized trait matrix.
-    """
-    # The StandardScaler uses the population standard deviation (ddof=0) by default
-
-    # scaler = StandardScaler()
-    # standardized_traits = pd.DataFrame(
-    #     scaler.fit_transform(trait_matrix),
-    #     index=trait_matrix.index,
-    #     columns=trait_matrix.columns,
-    # )
-    # We use the sample standard deviation (ddof=1) for our calculations.
-    standardized_traits = (trait_matrix - trait_matrix.mean()) / trait_matrix.std(
-        ddof=1
-    )
-
-    return standardized_traits
-
-
-def standardize_trait_matrix_min_max(trait_matrix: pd.DataFrame) -> pd.DataFrame:
-    """
-    Standardize the trait matrix to have values between 0 and 1 for each trait.
-
-    Args:
-        trait_matrix (pd.DataFrame): DataFrame with species as rows and traits as columns.
-
-    Returns:
-        pd.DataFrame: Standardized trait matrix.
-    """
-
-    scaler = MinMaxScaler()
-    standardized_traits = pd.DataFrame(
-        scaler.fit_transform(trait_matrix),
-        index=trait_matrix.index,
-        columns=trait_matrix.columns,
-    )
-
-    return standardized_traits
-
-
 def standardize_trait_matrix(
     trait_matrix: pd.DataFrame, method: str = None
 ) -> pd.DataFrame:
@@ -111,9 +62,11 @@ def standardize_trait_matrix(
         return trait_matrix.copy()
 
     if method == "z_score":
-        return standardize_trait_matrix_z_score(trait_matrix)
+        return (trait_matrix - trait_matrix.mean()) / trait_matrix.std(ddof=1)
     elif method == "min_max":
-        return standardize_trait_matrix_min_max(trait_matrix)
+        return (trait_matrix - trait_matrix.min()) / (
+            trait_matrix.max() - trait_matrix.min()
+        )
     else:
         raise ValueError("Invalid method. Choose 'z_score', 'min_max' or None.")
 
@@ -121,14 +74,17 @@ def standardize_trait_matrix(
 # --- Distance calculation functions ---
 
 
-def euclidean_distance(
-    traits: pd.DataFrame, metric: str = "euclidean", standardize_method: str = None
+def compute_distance_matrix(
+    traits: pd.DataFrame, metric: str, standardize_method: str = None
 ) -> pd.DataFrame:
     """Compute the pairwise distance matrix for a given trait matrix.
 
     Args:
         traits (pd.DataFrame): DataFrame with species as rows and traits as columns
-        metric (str, default="euclidean"): distance metric to use
+
+        metric (str): distance metric to use
+            - scipy.spatial.distance.pdist metrics: "braycurtis", "canberra", "chebyshev", "cityblock", "correlation", "cosine", "dice", "euclidean", "hamming", "jaccard", "jensenshannon", "mahalanobis", "matching", "minkowski", "rogerstanimoto", "russellrao", "seuclidean", "sokalsneath", "sqeuclidean", "yule"
+
         standardize_method (str, default=None): Method for standardizing traits before computing distances
 
     Returns:
@@ -137,8 +93,32 @@ def euclidean_distance(
 
     traits = standardize_trait_matrix(traits, method=standardize_method)
 
-    return pd.DataFrame(
-        squareform(pdist(traits, metric=metric)),
-        index=traits.index,
-        columns=traits.index,
-    )
+    SCIPY_METRICS = [
+        "braycurtis",
+        "canberra",
+        "chebyshev",
+        "cityblock",
+        "correlation",
+        "cosine",
+        "dice",
+        "euclidean",
+        "hamming",
+        "jaccard",
+        "jensenshannon",
+        "mahalanobis",
+        "matching",
+        "minkowski",
+        "rogerstanimoto",
+        "russellrao",
+        "seuclidean",
+        "sokalsneath",
+        "sqeuclidean",
+        "yule",
+    ]
+
+    if metric in SCIPY_METRICS:
+        distance_matrix = squareform(pdist(traits.values, metric=metric))
+    else:
+        raise ValueError("Invalid distance metric. Choose from SCIPY_METRICS.")
+
+    return pd.DataFrame(distance_matrix, index=traits.index, columns=traits.index)

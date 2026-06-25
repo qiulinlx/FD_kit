@@ -24,7 +24,6 @@ Functional volume intersections (FRic_intersect),
 def functional_richness(
     sp_loc: pd.DataFrame,
     traits: pd.DataFrame,
-    calculate_relative_abundance: bool = True,
     standardize_traits_method: str = None,
     local_standardization: bool = False,
 ) -> pd.DataFrame:
@@ -44,9 +43,6 @@ def functional_richness(
             - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
             - Columns: Trait names
             - Values: Trait values for each species (must be continuous numeric values)
-
-        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
-            If True, relative abundances will be calculated from absolute abundances.
 
         standardize_traits_method (str, default=None): Method for standardising traits.
             - "z_score": standardize traits to mean=0 and var=1 before computing FRic.
@@ -70,10 +66,6 @@ def functional_richness(
     # Pre-checks
     if "Species" in traits.columns:
         traits = traits.set_index("Species")
-
-    # Calculate relative abundances if not specified
-    if calculate_relative_abundance:
-        sp_loc = compute_relative_abundance(sp_loc)
 
     # Standardize traits globaly
     if local_standardization:
@@ -588,10 +580,7 @@ def raos_Q(
 
         # Compute Rao's Quadratic Entropy
         # Formula = (rel_abundances^T * (dist_matrix^2) * rel_abundances) / 2
-        RaoQ = (
-            np.sum((valid_dist_matrix**2) * np.outer(rel_abundances, rel_abundances))
-            / 2
-        )
+        RaoQ = np.sum((valid_dist_matrix) * np.outer(rel_abundances, rel_abundances))
 
         RaosQ_values.append(RaoQ)
         pIDs.append(pID)

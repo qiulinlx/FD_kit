@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from .preprocessing import calculate_relative_abundance
+from .preprocessing import compute_relative_abundance
 
 
 def species_richness(sp_loc: pd.DataFrame) -> pd.DataFrame:
@@ -49,7 +49,7 @@ def shannon_diversity(sp_loc: pd.DataFrame) -> pd.DataFrame:
 
     # Calculate relative abundances for each species in each plot
     # The Shannon index requires relative abundances, not absolute abundances
-    relative_abundance = calculate_relative_abundance(sp_loc).values
+    relative_abundance = compute_relative_abundance(sp_loc).values
 
     # Boolean mask to identify valid relative abundances (avoid log(0))
     valid_abundances = relative_abundance > 0
@@ -83,7 +83,7 @@ def simpsons_index(sp_loc: pd.DataFrame) -> pd.DataFrame:
     pIDs = sp_loc.index.copy()
 
     # Calculate relative abundances for each species in each plot
-    relative_abundance = calculate_relative_abundance(sp_loc).to_numpy()
+    relative_abundance = compute_relative_abundance(sp_loc).to_numpy()
 
     #
     simpsons_values = 1 - np.sum(relative_abundance**2, axis=1)
@@ -112,7 +112,7 @@ def shannon_equitability(sp_loc: pd.DataFrame) -> pd.DataFrame:
     """
     # Calculate relative abundances for each species in each plot
     # The Shannon Equitability index requires relative abundances, not absolute abundances
-    relative_abundance = calculate_relative_abundance(sp_loc).to_numpy()
+    relative_abundance = compute_relative_abundance(sp_loc).to_numpy()
 
     pIDs = sp_loc.index.copy()
 

@@ -12,8 +12,8 @@ from .sdiv import (
     simpsons_index,
 )
 from .preprocessing import (
-    calculate_relative_abundance,
-    euclidean_distance,
+    compute_relative_abundance,
+    compute_distance_matrix,
     standardize_trait_matrix,
 )
 
@@ -23,8 +23,8 @@ __all__ = [
     "functional_divergence",
     "functional_dispersion",
     "raos_Q",
-    "calculate_relative_abundance",
-    "euclidean_distance",
+    "compute_relative_abundance",
+    "compute_distance_matrix",
     "standardize_trait_matrix",
     "simpsons_index",
     "species_richness",

@@ -4,21 +4,11 @@ import pandas as pd
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import pdist
 from scipy.spatial import Delaunay
-
-from networkx import from_numpy_array, minimum_spanning_tree
+from scipy.sparse.csgraph import minimum_spanning_tree
 
 from .preprocessing import compute_relative_abundance
 from .preprocessing import standardize_trait_matrix
 from .preprocessing import compute_distance_matrix
-
-
-"""
-TODO:
-Add argument:
-Euclidean vs Gower
-
-Functional volume intersections (FRic_intersect),
-"""
 
 
 def functional_richness(
@@ -221,21 +211,28 @@ def functional_evenness(
             continue
 
         # Minimum Spanning Tree using NetworkX
-        G = from_numpy_array(valid_dist_matrix)
-        mst = minimum_spanning_tree(G)
+        # G = from_numpy_array(valid_dist_matrix)
+        # mst = minimum_spanning_tree(G)
+        mst = minimum_spanning_tree(valid_dist_matrix)
+
+        mst_coo = mst.tocoo()
+        i = mst_coo.row
+        j = mst_coo.col
+        edge_weights = mst_coo.data
 
         if abundance_weighted:
             weights = site_row[valid_species].values
         else:
             weights = np.full(S, 1 / S)
 
+        EW_list = edge_weights / (weights[i] + weights[j])
         # Weighted branch lengths
-        EW_list = []
+        # EW_list = []
 
-        # Calculate Weighted Evenness (EW) for each branch in the MST
-        for i, j, data in mst.edges(data=True):
-            EW = data["weight"] / (weights[i] + weights[j])
-            EW_list.append(EW)
+        # # Calculate Weighted Evenness (EW) for each branch in the MST
+        # for i, j, data in mst.edges(data=True):
+        #     EW = data["weight"] / (weights[i] + weights[j])
+        #     EW_list.append(EW)
 
         # Calculate Partial Weighted Evenness (PEW)
         EW_list = np.array(EW_list)
@@ -483,7 +480,7 @@ def raos_Q(
     calculate_relative_abundance: bool = True,
     local_standardization: bool = False,
     standardize_traits_method: str = None,
-    distance_metric: str = None,
+    distance_metric: str = "euclidean",
 ) -> pd.DataFrame:
     """
     Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
@@ -516,7 +513,7 @@ def raos_Q(
             - "min_max": standardize traits to range [0, 1] before computing RaoQ.
             - None: do not standardize traits.
 
-        distance_metric (str, default=None): distance metric to use for computing the distance matrix.
+        distance_metric (str, default="euclidean"): distance metric to use for computing the distance matrix.
 
     Returns:
         pd.DataFrame: Dataframe containing two columns:

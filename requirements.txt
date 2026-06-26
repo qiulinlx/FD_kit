@@ -1,13 +1,9 @@
-torch ==2.1.2
+jupyter
+matplotlib
+networkx
 numpy
 pandas
-scikit-learn
+rpy2
+scikit_learn
 scipy
-matplotlib
 seaborn
-statsmodels
-joblib
-geopandas
-shapely
-pyproj
-pyyaml

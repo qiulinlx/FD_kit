@@ -2,86 +2,623 @@ import numpy as np
 import pandas as pd
 
 from scipy.spatial import ConvexHull
-from scipy.spatial.distance import pdist, squareform
-
-from sklearn.preprocessing import StandardScaler
-
-import networkx as nx
-# from utils.abundance_utils import Relative_Abundance, normalise_abundance
-
-
+from scipy.spatial.distance import pdist
 from scipy.spatial import Delaunay
+from scipy.sparse.csgraph import minimum_spanning_tree
+
+from .preprocessing import compute_relative_abundance
+from .preprocessing import standardize_trait_matrix
+from .preprocessing import compute_distance_matrix
 
 
-"""
-TODO: 
-Add argument:
-Euclidean vs Gower
-Abundance Weighting for Centroids and more
-
-
-Functional richness (FRic),
-Functional volume intersections (FRic_intersect),
-Functional divergence (FDiv),
-Functional evenness (FEve),
-Functional dispersion (FDis)
-
-Rao's Quadratic Entropy (RaoQ)
-
-"""
-def Functional_Richness(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame:
+def functional_richness(
+    sp_loc: pd.DataFrame,
+    traits: pd.DataFrame,
+    standardize_traits_method: str = None,
+    local_standardization: bool = False,
+) -> pd.DataFrame:
     """
     Compute Functional Richness (FRic) as the volume of the convex hull
     in standardized trait space.
 
     Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        traits: np.ndarray of shape (S, T) where S = species, T = traits
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the traits DataFrame "traits.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        traits (pd.DataFrame): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        standardize_traits_method (str, default=None): Method for standardising traits.
+            - "z_score": standardize traits to mean=0 and var=1 before computing FRic.
+            - "min_max": standardize traits to range [0, 1] before computing FRic.
+            - None: do not standardize traits.
+
+        local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
 
     Returns:
-        FRic (float) or None if not enough species to form a convex hull
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Functional_Richness": Functional Richness (FRic) value for each plot
+
+    Notes:
+        Trait standardization is done globally across all species, not per plot.
+
+        FRic is undefined for plots with fewer species than traits (S <= T) or fewer than 3 species (S < 3).
+
+        For a single trait (1D), FRic is the range of trait values (max - min) for species present in the plot.
     """
+    # Pre-checks
+    if "Species" in traits.columns:
+        traits = traits.set_index("Species")
+
+    # Standardize traits globaly
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
+
+    pIDs = []
+    FRic_list = []
+
+    # Core loop over each plot
+    for pID in sp_loc.index:
+        # Get species present in the plot (have non-zero abundance)
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
+
+        # Subset the species in the traits DataFrame to only those present in the plot
+        valid_species = traits_processed.index.intersection(present_species)
+
+        # Subset the traits DataFrame to only include the valid species
+        traits_sub = traits_processed.loc[valid_species].copy()
+
+        n_species, n_traits = traits_sub.shape
+
+        # Edge Cases:
+        # Number of species must exceed number of traits for convex hull to be defined
+        # In the case of 2D traits, at least 3 species are needed to form a convex hull
+        if n_species <= n_traits or n_species < 3:
+            FRic_list.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        if local_standardization:
+            traits_sub = standardize_trait_matrix(
+                traits_sub, method=standardize_traits_method
+            )
+
+        if n_traits == 1:
+            # For a single trait, FRic is the range of trait values (max - min)
+            FRic = traits_sub.values.max() - traits_sub.values.min()
+        else:
+            # For multi-dimensional traits, compute the convex hull and its volume
+            hull = ConvexHull(traits_sub.values)
+            FRic = hull.volume
+
+        pIDs.append(pID)
+        FRic_list.append(FRic)
+
+    return pd.DataFrame({"PID": pIDs, "Functional_Richness": FRic_list})
+
+
+def functional_evenness(
+    sp_loc: pd.DataFrame,
+    traits: pd.DataFrame = None,  # use when local_standardization is True
+    distance_matrix: pd.DataFrame = None,  # use when local_standardization is False
+    abundance_weighted: bool = True,
+    local_standardization: bool = False,
+    standardize_traits_method: str = None,
+    distance_metric: str = "euclidean",
+) -> pd.DataFrame:
+    """
+    Compute Functional Evenness (FEve) using the Minimum Spanning Tree (MST) approach (Villéger et al., 2008)
+
+    Args:
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the distance_matrix DataFrame "distance_matrix.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        traits (pd.DataFrame, default=None): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        distance_matrix (pd.DataFrame, default=None): pre-computed distance matrix
+            Structure:
+            - Species x Species distance matrix (square form)
+            - Row and Column Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+
+        abundance_weighted (bool, default=True): whether to weight edges by relative abundances. Is also used to compute the relative abundances.
+            True  - each edge in the MST will be weighted by the relativeabundances of the species it connects.
+            False - all edges in the MST will be weighted equally as 1/S.
+
+        local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
+
+        standardize_traits_method (str, default=None): Method for standardizing traits.
+            - "z_score": standardize traits to mean=0 and var=1 before computing FEve.
+            - "min_max": standardize traits to range [0, 1] before computing FEve.
+            - None: do not standardize traits.
+
+        distance_metric (str, default="euclidean"): distance metric to use for computing the distance matrix.
+
+    Returns:
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Functional_Evenness": Functional Evenness (FEve) value for each plot
+
+    Notes:
+        FEve is undefined for plots with fewer than 3 species.
+    """
+
+    # Pre-checks
+    if abundance_weighted:
+        sp_loc = compute_relative_abundance(sp_loc)
+
+    if local_standardization and traits is None:
+        raise ValueError("traits must be provided when local_standardization is True.")
+    else:
+        if distance_matrix is None:
+            if traits is None:
+                raise ValueError("Either distance_matrix or traits must be provided.")
+            distance_matrix = compute_distance_matrix(
+                traits,
+                metric=distance_metric,
+                standardize_method=standardize_traits_method,
+            )
+
+    pIDs = []
+    FEve_list = []
+
+    # Core loop over each plot
+    for pID in sp_loc.index:
+        # Get species present in the plot (have non-zero abundance)
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
+
+        if local_standardization:
+            valid_species = traits.index.intersection(present_species)
+            # Subset traits for present species
+            traits_sub = traits.loc[valid_species].copy()
+
+            # Compute distance matrix for the standardized traits
+            valid_dist_matrix = compute_distance_matrix(
+                traits_sub,
+                metric=distance_metric,
+                standardize_method=standardize_traits_method,
+            ).values
+        else:
+            valid_species = distance_matrix.index.intersection(present_species)
+            valid_dist_matrix = distance_matrix.loc[valid_species, valid_species].values
+
+        S = len(valid_species)
+
+        # Edge Cases:
+        # FEve is undefined for <3 species
+        if S < 3:
+            FEve_list.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        # Minimum Spanning Tree using NetworkX
+        # G = from_numpy_array(valid_dist_matrix)
+        # mst = minimum_spanning_tree(G)
+        mst = minimum_spanning_tree(valid_dist_matrix)
+
+        mst_coo = mst.tocoo()
+        i = mst_coo.row
+        j = mst_coo.col
+        edge_weights = mst_coo.data
+
+        if abundance_weighted:
+            weights = site_row[valid_species].values
+        else:
+            weights = np.full(S, 1 / S)
+
+        EW_list = edge_weights / (weights[i] + weights[j])
+        # Weighted branch lengths
+        # EW_list = []
+
+        # # Calculate Weighted Evenness (EW) for each branch in the MST
+        # for i, j, data in mst.edges(data=True):
+        #     EW = data["weight"] / (weights[i] + weights[j])
+        #     EW_list.append(EW)
+
+        # Calculate Partial Weighted Evenness (PEW)
+        EW_list = np.array(EW_list)
+        PEW = EW_list / EW_list.sum()
+
+        # Calculate Functional Evenness (FEve)
+        numerator = np.sum(np.minimum(PEW, 1 / (S - 1))) - 1 / (S - 1)
+        denominator = 1 - 1 / (S - 1)
+        FEve = numerator / denominator
+
+        FEve_list.append(FEve)
+        pIDs.append(pID)
+
+    return pd.DataFrame({"PID": pIDs, "Functional_Evenness": FEve_list})
+
+
+def functional_divergence(
+    sp_loc: pd.DataFrame,
+    traits: pd.DataFrame,
+    calculate_relative_abundance: bool = True,
+    standardize_traits_method: str = None,
+    local_standardization: bool = False,
+) -> pd.DataFrame:
+    """
+    Compute Functional Divergence (FDiv).
+
+    Args:
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the traits DataFrame "traits.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        traits (pd.DataFrame): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
+            If True, relative abundances will be calculated from absolute abundances.
+
+        standardize_traits_method (str, default=None): Method for standardizing traits.
+            - "z_score": standardize traits to mean=0 and var=1 before computing FDiv.
+            - "min_max": standardize traits to range [0, 1] before computing FDiv.
+            - None: do not standardize traits.
+
+        local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
+
+    Returns:
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Functional_Divergence": Functional Divergence (FDiv) value for each plot
+
+    Notes:
+        - FDiv is undefined for plots with fewer than 3 species.
+        - Distance to centroid is calculated using Euclidean distance.
+    """
+
+    # Pre-checks
+    if "Species" in traits.columns:
+        traits = traits.set_index("Species")
+
+    if calculate_relative_abundance:
+        sp_loc = compute_relative_abundance(sp_loc)
+
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
+
+    pIDs = []
+    FDiv_values = []
+
+    # Core loop over each plot
+    for pID in sp_loc.index:
+        # Get species present in the plot (have non-zero abundance)
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
+
+        # Subset the species in the traits DataFrame to only those present in the plot
+        valid_species = traits_processed.index.intersection(present_species)
+
+        S = len(valid_species)
+
+        # Edge Cases:
+        # FDiv is undefined for <3 species
+        if S < 3:
+            FDiv_values.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        # Subset traits and abundances for present species
+        traits_sub = traits_processed.loc[valid_species].values
+        abundances = site_row[valid_species].values
+
+        if local_standardization:
+            traits_sub = standardize_trait_matrix(
+                pd.DataFrame(traits_sub, index=valid_species),
+                method=standardize_traits_method,
+            )
+
+        # If the number of species is less than the number of traits, FDiv is undefined
+        if S < traits_sub.shape[1]:
+            FDiv_values.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        # Compute centroid based on vertices of the convex hull (Villéger et al., 2008)
+        hull = ConvexHull(traits_sub)
+        hull_vertices = traits_sub[hull.vertices]
+        centroid = np.mean(hull_vertices, axis=0)
+
+        # Compute distances from centroid (Euclidean distance)
+        distances = np.linalg.norm(traits_sub - centroid, axis=1)
+        # Mean distance to centroid
+        dG = np.mean(distances)
+
+        # Weight the distances by abundances
+        delta_d = np.sum(abundances * (distances - dG))
+        abs_delta_d = np.sum(abundances * np.abs(distances - dG))
+
+        # Compute Functional Divergence (FDiv)
+        FDiv = (delta_d + dG) / (abs_delta_d + dG)
+
+        FDiv_values.append(FDiv)
+        pIDs.append(pID)
+
+    return pd.DataFrame({"PID": pIDs, "Functional_Divergence": FDiv_values})
+
+
+def functional_dispersion(
+    sp_loc: pd.DataFrame,
+    traits: pd.DataFrame,
+    abundance_weighted: bool = True,
+    standardize_traits_method: str = None,
+    local_standardization: bool = False,
+) -> pd.DataFrame:
+    """
+    Compute Functional Dispersion (FDis) for a community.
+
+    FDis measures the spread of species in trait space.
+    Can be computed as abundance-weighted or unweighted.
+
+    Args:
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the traits DataFrame "traits.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        traits (pd.DataFrame): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        abundance_weighted (bool, default=True): whether to weight the centroid by relative abundances.
+            True - the centroid is computed as the abundance-weighted mean of species traits.
+            False - the centroid is computed as the unweighted mean of species traits.
+
+        standardize_traits_method (str, default=None): Method for standardizing traits.
+            - "z_score": standardize traits to mean=0 and var=1 before computing FDis.
+            - "min_max": standardize traits to range [0, 1] before computing FDis.
+            - None: do not standardize traits.
+
+        local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
+
+    Returns:
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Functional_Dispersion": Functional Dispersion (FDis) value for each plot
+    """
+    # Pre-checks
+    if "Species" in traits.columns:
+        traits = traits.set_index("Species")
+
+    if abundance_weighted:
+        sp_loc = compute_relative_abundance(sp_loc)
+
+    if local_standardization:
+        traits_processed = traits.copy()
+    else:
+        traits_processed = standardize_trait_matrix(
+            traits, method=standardize_traits_method
+        )
+
+    pIDs = []
+    FDis_values = []
+
+    # Core loop over each plot
+    for pID in sp_loc.index:
+        # Get species present in the plot (have non-zero abundance)
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
+
+        # Subset the species in the traits DataFrame to only those present in the plot
+        valid_species = traits_processed.index.intersection(present_species)
+
+        S = len(valid_species)
+
+        if S < 2:
+            FDis_values.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        # Subset traits for present species
+        traits_sub = traits_processed.loc[valid_species].values
+
+        if local_standardization:
+            traits_sub = standardize_trait_matrix(
+                traits_sub, method=standardize_traits_method
+            )
+
+        if abundance_weighted:
+            # Use abundance-weighted centroid
+            abundances = site_row[valid_species].values
+
+            centroid = np.sum(traits_sub * abundances[:, None], axis=0)
+        else:
+            # Use unweighted centroid
+            centroid = np.mean(traits_sub, axis=0)
+
+        # Compute euclidean distances from centroid
+        distances = np.linalg.norm(traits_sub - centroid, axis=1)
+
+        # Compute FDis
+        if abundance_weighted:
+            FDis = np.sum(distances * abundances) / np.sum(abundances)
+        else:
+            FDis = np.mean(distances)
+
+        FDis_values.append(FDis)
+        pIDs.append(pID)
+
+    return pd.DataFrame({"PID": pIDs, "Functional_Dispersion": FDis_values})
+
+
+def raos_Q(
+    sp_loc: pd.DataFrame,
+    traits: pd.DataFrame = None,  # use when local_standardization is True
+    distance_matrix: pd.DataFrame = None,  # use when local_standardization is False
+    calculate_relative_abundance: bool = True,
+    local_standardization: bool = False,
+    standardize_traits_method: str = None,
+    distance_metric: str = "euclidean",
+) -> pd.DataFrame:
+    """
+    Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
+
+    Args:
+        sp_loc (pd.DataFrame): Pivot table of Plot IDs and Species
+            Structure:
+            - Row Index: Plot Identifier (Plot Index)
+            - Columns: Species names matching the strings in the distance_matrix DataFrame "distance_matrix.index"
+            - Values: Abundance of each species in the corresponding plot
+
+        traits (pd.DataFrame, default=None): functional trait matrix of shape (S, T) where S = species, T = traits
+            Structure:
+            - Row Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+            - Columns: Trait names
+            - Values: Trait values for each species (must be continuous numeric values)
+
+        distance_matrix (pd.DataFrame): pre-computed distance matrix
+            Structure:
+            - Species x Species distance matrix (square form)
+            - Row and Column Index: Species names matching the strings in the sp_loc DataFrame "sp_loc.columns"
+
+        calculate_relative_abundance (bool, default=True): if sp_loc already contains relative abundances, set to False.
+            If True, relative abundances will be calculated from absolute abundances.
+
+        local_standardization (bool, default=False): If True, standardize traits per plot instead of globally.
+
+        standardize_traits_method (str, default=None): Method for standardizing traits.
+            - "z_score": standardize traits to mean=0 and var=1 before computing RaoQ.
+            - "min_max": standardize traits to range [0, 1] before computing RaoQ.
+            - None: do not standardize traits.
+
+        distance_metric (str, default="euclidean"): distance metric to use for computing the distance matrix.
+
+    Returns:
+        pd.DataFrame: Dataframe containing two columns:
+            - "PID": Plot Identifier
+            - "Raos_Q": Rao's Quadratic Entropy (RaoQ) value for each plot
+    """
+
+    # Pre-checks
+    if calculate_relative_abundance:
+        sp_loc = compute_relative_abundance(sp_loc)
+
+    if local_standardization and traits is None:
+        raise ValueError("traits must be provided when local_standardization is True.")
+    else:
+        if distance_matrix is None:
+            if traits is None:
+                raise ValueError("Either distance_matrix or traits must be provided.")
+            distance_matrix = compute_distance_matrix(
+                traits,
+                metric=distance_metric,
+                standardize_method=standardize_traits_method,
+            )
+
+    pIDs = []
+    RaosQ_values = []
+
+    # Core loop over each plot
+    for pID in sp_loc.index:
+        # Get species present in the plot (have non-zero abundance)
+        site_row = sp_loc.loc[pID]
+        present_species = site_row[site_row > 0].index
+
+        if local_standardization:
+            # Subset the species in the traits DataFrame to only those present in the plot
+            valid_species = traits.index.intersection(present_species)
+            # Subset traits for present species
+            traits_sub = traits.loc[valid_species].copy()
+
+            # Compute distance matrix for the standardized traits
+            valid_dist_matrix = compute_distance_matrix(
+                traits_sub,
+                metric=distance_metric,
+                standardize_method=standardize_traits_method,
+            ).values
+        else:
+            # Subset the species in the distance matrix to only those present in the plot
+            valid_species = distance_matrix.index.intersection(present_species)
+            valid_dist_matrix = distance_matrix.loc[valid_species, valid_species].values
+
+        S = len(valid_species)
+
+        # Edge Cases:
+        # Rao's Q is undefined for <2 species
+        if S < 2:
+            RaosQ_values.append(np.nan)
+            pIDs.append(pID)
+            continue
+
+        # Subset the relative abundances for the valid species
+        rel_abundances = site_row[valid_species].values
+
+        # Compute Rao's Quadratic Entropy
+        # Formula = (rel_abundances^T * (dist_matrix^2) * rel_abundances) / 2
+        RaoQ = np.sum((valid_dist_matrix) * np.outer(rel_abundances, rel_abundances))
+
+        RaosQ_values.append(RaoQ)
+        pIDs.append(pID)
+
+    return pd.DataFrame({"PID": pIDs, "Raos_Q": RaosQ_values})
+
+
+def MPD(sp_loc: pd.DataFrame, traits: np.ndarray) -> pd.DataFrame:
     pID = []
-    Frich = []
+    mpd_list = []
 
     species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
 
-    for i, species in enumerate(species_PID):
-        pid = species_PID.index[i]
-        
-        # Select traits for species
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
+    for pid, species in zip(species_PID.index, species_PID):
+        S = len(species)
 
-        n_species, n_traits = np.array(traits_sub).shape
-
-        if n_species <= n_traits  or n_species < 3:
-            # FEve undefined for <2 species
-            Frich.append(np.nan)
+        if S < 3:
+            # Metric undefined for <2 species
+            mpd_list.append(np.nan)
             pID.append(pid)
-            
+
             continue
-            continue  # will automatically go to the next iteration
-        # Scale traits
-        traits_scaled = StandardScaler().fit_transform(traits_sub)
 
-        n_species, n_traits = traits_scaled.shape
+        traits_sub = traits[traits["Species"].isin(species)].copy()
+        traits_sub.drop(columns=["Species"], inplace=True)
 
-        hull = ConvexHull(traits_scaled)
-        FRic = hull.volume
-        Frich.append(FRic)
+        # pairwise distances
+        distances = pdist(traits_sub.values, metric="euclidean")
+
+        # MPD
+        mpd = distances.mean()
+        mpd_list.append(mpd)
         pID.append(pid)
 
-    
-    FRich_df= pd.DataFrame({"PID": pID, "Functional_Richness": Frich})
-
-    return FRich_df
+    return pd.DataFrame({"PID": pID, "Mean Pairwise D": mpd_list})
 
 
-def Frich_Intersect(hull1, hull2, n_samples: int = 100000) -> float:
+def frich_intersect(hull1, hull2, n_samples: int = 100000) -> float:
     """
     GPT GENERATED REQUIRES MORE VERIFICATION
-    Compute approximate Functional Volume Intersection (FRic_intersect) 
+    Compute approximate Functional Volume Intersection (FRic_intersect)
     between two communities using convex hulls.
 
     Args:
@@ -113,292 +650,3 @@ def Frich_Intersect(hull1, hull2, n_samples: int = 100000) -> float:
 
     FRic_intersect = intersection_fraction / union_fraction if union_fraction > 0 else 0
     return FRic_intersect
-
-
-def Functional_Evenness(sp_loc: pd.DataFrame, traits: pd.DataFrame, Relative_abundance: bool = False) -> pd.DataFrame:
-    """
-    Compute Functional Evenness (FEve) using the MST approach (Villéger et al., 2008)
-    for presence/absence data.
-
-    Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        traits: dataframe of functional traits (rows=species, columns=traits), must have column "Species"
-
-    Returns:
-        FEve_df: DataFrame with PID and Functional Evenness
-    """
-    pID = []
-    FEven = []
-
-    # Get species present in each PID
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for pid, species in zip(species_PID.index,species_PID):
-   
-        S = len(species)
-
-        if S < 3:
-            # FEve undefined for <2 species
-            FEven.append(np.nan)
-            pID.append(pid)
-            
-            continue
-
-        # Subset traits for present species
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
-
-        # Distance matrix
-        dist_matrix = squareform(pdist(traits_sub.values, metric='euclidean'))
-
-        # Minimum Spanning Tree
-        G = nx.from_numpy_array(dist_matrix)
-        mst = nx.minimum_spanning_tree(G)
-
-        # Weighted branch lengths
-        EW_list = []
-        
-
-        if Relative_abundance:
-            ab= sp_loc[sp_loc.index == pid]
-            ab = ab[[c for c in species if c in ab.columns]]
-
-            ab = ab.loc[:, ab.columns.isin(traits["Species"])] # Check that species are in both Dfs
-
-            ab = ab.div(ab.sum(axis=1), axis=0)
-            ab=np.array(ab)[0]
-
-            for u, v, data in mst.edges(data=True):
-                EW = data['weight'] / (ab[u] + ab[v])
-                EW_list.append(EW)
-
-        else:
-            for u, v, data in mst.edges(data=True):
-                            EW = data['weight'] / 2
-                            EW_list.append(EW)
-
-        EW_array = np.array(EW_list)
-        PEW = EW_array / EW_array.sum()
-
-        FEve = np.sum(np.minimum(PEW, 1 / (S - 1))) / (1 - 1 / (S - 1))
-
-        FEven.append(FEve)
-        pID.append(pid)
-        
-
-    FEve_df = pd.DataFrame({"PID": pID, "Functional_Evenness": FEven})
-    return FEve_df
-
-def Functional_Divergence(sp_loc:pd.DataFrame, traits: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute Functional Divergence (FDiv).
-
-    Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        trait_array: np.ndarray of shape (S, T)
-
-    Returns:
-        FDiv (float)
-    """
-    
-    pID = []
-    FDivergence = []
-
-    # Get species present in each PID
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for pid, species in zip(species_PID.index,species_PID):
-        
-        S = len(species)
-        
-        if S < 3:
-            # FEve undefined for <2 species
-            FDivergence.append(np.nan)
-            pID.append(pid)
-            
-            continue
-
-        ab= sp_loc[sp_loc.index == pid]
-        # Relative abundancesp    
-        ab = ab[[c for c in species if c in ab.columns]]
-
-        ab = ab.loc[:, ab.columns.isin(traits["Species"])] # Check that species are in both Dfs
-
-        ab = ab.div(ab.sum(axis=1), axis=0)
-        ab=np.array(ab)[0]
-
-        # Subset traits for present species
-        trait_array = traits[traits["Species"].isin(species)].copy()
-        trait_array.drop(columns=['Species'], inplace=True)
-
-
-        # Compute community centroid
-        centroid = np.array(np.mean(trait_array, axis=0))
-        trait_array=np.array(trait_array)
-        distances = np.linalg.norm(trait_array - centroid, axis=1) 
-        dG= np.mean(distances)
-
-        # Distances to centroid
-        delta_d= np.sum(ab * (distances - dG))
-
-        abs_delta_d = np.sum(ab * np.abs(distances - dG))
-
-        FDiv = (delta_d + dG) / (abs_delta_d + dG)
-        FDivergence.append(FDiv)
-        pID.append(pid)
-
-    FDiv_df = pd.DataFrame({"PID": pID, "Functional_Divergences": FDivergence})
-    
-    return FDiv_df
-
-
-def Functional_Dispersion(sp_loc:pd.DataFrame, traits: np.ndarray, weighted: bool=False) -> pd.DataFrame:
-    """
-    Compute Functional Dispersion (FDis) for a community.
-
-    FDis measures the spread of species in trait space.
-    Can be computed as abundance-weighted or unweighted.
-
-    Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        traits (np.ndarray): Trait matrix of shape (S, T), where S = species, T = traits.
-        weighted (bool): If True, compute abundance-weighted FDis. If False, compute unweighted FDis.
-
-    Returns:
-        float: Functional Dispersion (FDis)
-    """
-    
-    pID = []
-    FDispersion = []
-
-    # Get species present in each PID
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for pid, species in zip(species_PID.index,species_PID):
-   
-        S = len(species)
-
-        if S < 3:
-            # FEve undefined for <2 species
-            FDispersion.append(np.nan)
-            pID.append(pid)
-            
-            continue
-
-        # Subset traits for present species
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
-
-        if weighted:
-
-            ab= sp_loc[sp_loc.index == pid]
-            ab = ab[[c for c in species if c in ab.columns]]
-            ab = ab.div(ab.sum(axis=1), axis=0)
-            ab=np.array(ab)[0]
-
-            centroid = np.sum(traits_sub * ab[:, None], axis=0)  # Abundance-weighted centroid
-
-        else:
-            centroid = np.mean(traits_sub, axis=0)  # Unweighted centroid
-
-        # Distances from centroid
-        distances = np.linalg.norm(traits_sub - centroid, axis=1)
-
-        # Compute FDis
-        FDis = np.sum(distances * ab) if weighted else np.mean(distances)
-        FDispersion.append(FDis)
-        pID.append(pid)
-    
-    FDis_df = pd.DataFrame({"PID": pID, "Functional_Dispersion": FDispersion})
-
-    return FDis_df
-
-
-
-def Raos_Q(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
-    """
-    Compute Rao's Quadratic Entropy (RaoQ) from a trait distance matrix.
-
-    Args:
-        sp_loc: Pivot table of Plot IDs and Species
-        trait_array: np.ndarray of shape (S, T)
-
-    Returns:
-        RaoQ (float)
-    """
-
-    pID = []
-    RaosQ = []
-
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for pid, species in zip(species_PID.index,species_PID):
-
-        S = len(species)
-
-        if S < 3:
-            # FEve undefined for <2 species
-            RaosQ.append(np.nan)
-            pID.append(pid)
-            
-            continue
-        
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
-
-        dist_matrix = squareform(pdist(traits_sub, metric='euclidean'))
-        
-        ab= sp_loc[sp_loc.index == pid]
-        ab = ab[[c for c in species if c in ab.columns]]
-
-        ab = ab.loc[:, ab.columns.isin(traits["Species"])] # Check that species are in both Dfs
-
-
-        ab = ab.div(ab.sum(axis=1), axis=0)
-        ab=np.array(ab)[0]
-
-        # Compute abundance weight matrix
-        weight_matrix = np.outer(ab, ab)
-
-        # Optional: set diagonal to zero
-        # np.fill_diagonal(weight_matrix, 0)
-
-        # Rao's Q = sum(p_i * p_j * d_ij)
-        RaoQ = np.sum(weight_matrix * dist_matrix)
-
-        RaosQ.append(RaoQ)
-        pID.append(pid)
-    
-    RQ_df = pd.DataFrame({"PID": pID, "Raos_Q": RaosQ})
-
-    return RQ_df
-
-def MPD(sp_loc:pd.DataFrame, traits: np.ndarray) -> pd.DataFrame():
-    pID = []
-    mpd_list = []
-
-    species_PID = sp_loc.apply(lambda row: row.index[row != 0].tolist(), axis=1)
-
-    for pid, species in zip(species_PID.index,species_PID):
-
-        S = len(species)
-
-        if S < 3:
-            # Metric undefined for <2 species
-            mpd_list.append(np.nan)
-            pID.append(pid)
-            
-            continue
-        
-        traits_sub = traits[traits["Species"].isin(species)].copy()
-        traits_sub.drop(columns=['Species'], inplace=True)
-
-        # pairwise distances
-        distances = pdist(traits_sub.values, metric="euclidean")
-
-        # MPD
-        mpd = distances.mean()
-        mpd_list.append(mpd)
-        pID.append(pid)
-
-    return pd.DataFrame({"PID": pID, "Mean Pairwise D": mpd_list})
